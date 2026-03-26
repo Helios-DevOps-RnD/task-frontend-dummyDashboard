@@ -61,15 +61,16 @@ export default function Home() {
   const handleCreateUser = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${Create_URL}/pubsub/user`, 
+      await axios.post(`${Create_URL}/users`, 
         { username: createUsername, full_name: createFullName, email_address: createEmailAddress, password: createPassword });
-      alert('Request dikirim ke Pub/Sub! User dibuat di background.');
+      alert('User berhasil di buat!');
+
       setCreateUsername(''); 
       setCreateFullName(''); 
       setCreateEmailAddress(''); 
       setCreatePassword('');
 
-      if (showUsers) setTimeout(() => fetchAllUsers(), 1000); 
+      if (showUsers) fetchAllUsers(); 
     } catch (error) { 
       alert(error.response?.data?.message || 'Gagal membuat user'); 
     }
@@ -194,7 +195,7 @@ export default function Home() {
 
         {/* 1. Create User */}
         <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-300">
-          <h2 className="text-lg font-bold mb-3 text-black">1. Add User (Pub/Sub)</h2>
+          <h2 className="text-lg font-bold mb-3 text-black">1. Add User</h2>
           <form onSubmit={handleCreateUser} className="space-y-3">
             <input type="text" value={createUsername} onChange={(e) => setCreateUsername(e.target.value)} required className="w-full border border-gray-300 p-2 rounded text-sm outline-none focus:border-blue-500" placeholder="Username..." />
             <input type="text" value={createFullName} onChange={(e) => setCreateFullName(e.target.value)} required className="w-full border border-gray-300 p-2 rounded text-sm outline-none focus:border-blue-500" placeholder="Full Name..." />
