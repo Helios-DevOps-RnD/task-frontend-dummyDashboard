@@ -1,0 +1,38 @@
+name: Stale PR Handler
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # Setiap hari pukul 09:00 UTC
+  workflow_dispatch:       # Bisa dijalankan manual
+
+jobs:
+  stale:
+    name: Mark and Close Stale PRs
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Handle stale pull requests
+        uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          # Hanya tangani PR, bukan issues
+          stale-issue-message: ''
+          close-issue-message: ''
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          # Konfigurasi PR stale
+          days-before-pr-stale: 7
+          days-before-pr-close: 3
+          stale-pr-label: 'stale'
+          stale-pr-message: |
+            PR ini telah ditandai sebagai **stale** karena tidak ada aktivitas selama 7 hari.
+            
+            Jika kamu masih ingin melanjutkan PR ini, silakan tambahkan komentar atau push commit baru.
+            PR ini akan ditutup otomatis dalam **3 hari** jika tidak ada aktivitas.
+          close-pr-message: |
+            PR ini ditutup otomatis karena tidak ada aktivitas selama 10 hari.
+            
+            Jika kamu ingin melanjutkan pekerjaan ini, silakan buka kembali PR ini dan tambahkan komentar yang menjelaskan status terkini.
+          exempt-pr-labels: 'pinned,security,do-not-close'

@@ -4,8 +4,8 @@ import { useState } from 'react';
 import axios from 'axios';
 
 export default function Home() {
-  const API_URL = 'http://localhost:3000/api';
-  const Create_URL = 'http://localhost:3001/api';
+  const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001') + '/api';
+  const Create_URL = (process.env.NEXT_PUBLIC_PUBSUB_URL || 'http://localhost:3002') + '/api';
 
   // State Users
   const [users, setUsers] = useState([]);
