@@ -4,8 +4,9 @@ Dokumen ini menjelaskan standar kontribusi untuk repository ini.
 
 ## Branching Strategy
 
-Kami menggunakan Git Flow yang disederhanakan dengan dua protected branch:
+Kami menggunakan Git Flow yang disederhanakan dengan tiga protected branch:
 - `main` — kode production yang stabil
+- `staging` — environment pre-production untuk validasi akhir sebelum ke production
 - `develop` — integrasi pengembangan aktif
 
 ### Naming Convention Branch
@@ -16,8 +17,8 @@ Format: `<type>/<short-description>` atau `<type>/<issue-number>-<short-descript
 |---|---|---|---|---|
 | `feature` | Fitur baru | `develop` | `develop` | `feature/add-policy-crud` |
 | `fix` | Bugfix di develop | `develop` | `develop` | `fix/user-delete-error` |
-| `hotfix` | Bug kritis production | `main` | `main` + `develop` | `hotfix/firebase-upload-crash` |
-| `release` | Persiapan rilis | `develop` | `main` | `release/v1.2.0` |
+| `hotfix` | Bug kritis production | `main` | `main` + `staging` + `develop` | `hotfix/firebase-upload-crash` |
+| `release` | Persiapan rilis | `develop` | `staging` | `release/v1.2.0` |
 | `chore` | Maintenance, config, CI | `develop` | `develop` | `chore/update-express-version` |
 | `docs` | Dokumentasi saja | `develop` | `develop` | `docs/update-api-readme` |
 | `refactor` | Refactoring tanpa ubah fungsi | `develop` | `develop` | `refactor/cleanup-db-queries` |
@@ -48,6 +49,8 @@ Contoh:
 5. Minta review dari anggota tim
 6. Setelah approval terpenuhi, merge menggunakan Squash and Merge
 
+> **Catatan untuk release:** Buat PR dari `release/*` ke `staging` terlebih dahulu. Setelah validasi di staging selesai, buat PR dari `staging` ke `main`.
+
 > **Catatan khusus untuk perubahan UI:** Setiap PR yang mengubah komponen UI wajib menyertakan screenshot atau screen recording perubahan tampilan di deskripsi PR.
 
 ## Approval Requirements
@@ -55,6 +58,7 @@ Contoh:
 | Target Branch | Minimum Approver |
 |---|---|
 | `develop` | 1 |
+| `staging` | 1 |
 | `main` | 2 |
 
 ## Stale PR Policy
