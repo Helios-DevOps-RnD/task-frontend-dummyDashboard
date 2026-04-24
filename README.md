@@ -1,28 +1,47 @@
-# Frontend Dashboard - Task Dummy Microservices
+# hms-fe — Next.js Dashboard
 
-Repository ini berisi antarmuka pengguna (Frontend) untuk aplikasi Task Dummy BE/FE Dashboard. Dibangun menggunakan Next.js, aplikasi ini berkomunikasi dengan dua layanan backend terpisah (Main API dan Pub/Sub Service).
+Next.js 14 UI that talks to `hms-be` (read/update/delete) and `hms-pubsub` (create). Runs on **port 3000**.
 
-## 💻 Tech Stack
+## Prerequisites
 
-- Next.js
-- Tailwind CSS
-- Axios
+- Node.js 20+
+- `hms-be` running on `http://localhost:3001`
+- `hms-pubsub` running on `http://localhost:3002`
 
-## ⚙️ Persiapan (Prerequisites)
+## Quick start
 
-Sebelum menjalankan aplikasi Frontend ini, pastikan kedua layanan Backend sudah berjalan terlebih dahulu di terminal yang terpisah:
+```bash
+# 1. Install deps
+npm install
 
-- **Backend Main API** (menangani GET, PUT, DELETE) harus berjalan di `http://localhost:3000`
-- **Backend Pub/Sub** (menangani POST/Create User) harus berjalan di `http://localhost:3001`
+# 2. Create local env file (optional — defaults already point to 3001/3002)
+cp .env.example .env.local
+# edit .env.local only if you need to override API_URL / CREATE_URL
 
-## 🚀 Cara Menjalankan Aplikasi (Getting Started)
+# 3. Run it
+npm run dev
+```
 
-1. Pertama, install semua _dependencies_ yang dibutuhkan:
-   ```bash
-   npm install
-   ```
-2. Lalu jalankan :
-   ```bash
-   npm run dev
-   ```
-3. Buka browser dan akses aplikasi pada URL yang tertera di terminal (http://localhost:xxxx)
+Open `http://localhost:3000`.
+
+## Runtime env injection
+
+This app is deployed as **one image across staging & prod**. URLs are injected
+at runtime via `/public/env-config.js` (read by `window.__ENV__` in the browser):
+
+- **In Docker / k8s:** `entrypoint.sh` rewrites `/public/env-config.js` on
+  container start from the `hms-fe-config` ConfigMap (`API_URL`, `CREATE_URL`).
+- **In local dev:** the `predev` npm hook runs `scripts/gen-env-config.js`,
+  which reads `.env.local` (or shell env) and regenerates
+  `/public/env-config.js` before `next dev` starts.
+
+So you **never** edit `/public/env-config.js` by hand — change `.env.local`
+and re-run `npm run dev`.
+
+## Port conventions (local dev)
+
+| Service  | Port |
+| -------- | ---- |
+| **hms-fe** | **3000** |
+| hms-be   | 3001 |
+| hms-pubsub | 3002 |
