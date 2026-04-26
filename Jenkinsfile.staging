@@ -50,7 +50,7 @@ pipeline {
             steps {
                 echo "🧪 Running Jest unit tests..."
                 sh '''
-                    npm test -- --coverage --watchAll=false || true
+                    npm run test:coverage
                 '''
             }
             post {
