@@ -9,7 +9,8 @@ pipeline {
         DOCKER_REGISTRY = 'harbor.example.com'  // Update with your Harbor registry
         DOCKER_REPO = 'task-frontend'
         DOCKER_IMAGE = "${DOCKER_REGISTRY}/${DOCKER_REPO}"
-        DOCKER_TAG = "${BUILD_NUMBER}-staging"
+        COMMIT_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        DOCKER_TAG = "${COMMIT_HASH}-staging"
         
         // SonarQube Configuration
         SONARQUBE_HOST = 'http://10.0.2.4:9000'
@@ -135,17 +136,19 @@ pipeline {
         stage('Push to Harbor') {
             steps {
                 echo "📤 Pushing Docker image to Harbor..."
-                sh '''
-                    # Login to Harbor
-                    echo ${HARBOR_CREDENTIALS_PSW} | docker login -u ${HARBOR_CREDENTIALS_USR} --password-stdin ${DOCKER_REGISTRY}
-                    
-                    # Push images
-                    docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
-                    docker push ${DOCKER_IMAGE}:staging-latest
-                    
-                    # Logout
-                    docker logout ${DOCKER_REGISTRY}
-                '''
+                withCredentials([usernamePassword(credentialsId: 'harbor-credentials', usernameVariable: 'HARBOR_USERNAME', passwordVariable: 'HARBOR_PASSWORD')]) {
+                    sh '''
+                        # Login to Harbor using credentials
+                        echo ${HARBOR_PASSWORD} | docker login -u ${HARBOR_USERNAME} --password-stdin ${DOCKER_REGISTRY}
+                        
+                        # Push images
+                        docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                        docker push ${DOCKER_IMAGE}:staging-latest
+                        
+                        # Logout
+                        docker logout ${DOCKER_REGISTRY}
+                    '''
+                }
             }
         }
     }
