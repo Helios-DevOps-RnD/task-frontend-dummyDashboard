@@ -1,0 +1,185 @@
+// Jenkins Pipeline for Staging Branch
+// Stages: Unit Tests (Jest) → SonarQube → Build Docker → Trivy Scan → Push to Harbor
+
+pipeline {
+    agent any
+
+    environment {
+        // Docker & Harbor Configuration
+        DOCKER_REGISTRY = 'harbor.example.com'  // Update with your Harbor registry
+        DOCKER_REPO = 'task-frontend'
+        DOCKER_IMAGE = "${DOCKER_REGISTRY}/${DOCKER_REPO}"
+        DOCKER_TAG = "${BUILD_NUMBER}-staging"
+        
+        // SonarQube Configuration
+        SONARQUBE_HOST = 'http://10.0.2.4:9000'
+        SONARQUBE_TOKEN = credentials('sonarqube-token')  // Add this credential in Jenkins
+        
+        // Harbor Credentials
+        HARBOR_CREDENTIALS = credentials('harbor-credentials')  // Add this credential in Jenkins
+        
+        // Node Configuration
+        NODE_ENV = 'production'
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    echo "🔄 Checking out code from staging branch..."
+                    checkout scm
+                }
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                script {
+                    echo "📦 Installing npm dependencies..."
+                    sh 'npm ci'  // Use ci instead of install for CI/CD
+                }
+            }
+        }
+
+        stage('Unit Tests (Jest)') {
+            steps {
+                script {
+                    echo "🧪 Running Jest unit tests..."
+                    sh 'npm test -- --coverage --watchAll=false'
+                }
+            }
+            post {
+                always {
+                    // Publish test results
+                    junit 'coverage/junit.xml'
+                    
+                    // Publish coverage reports
+                    publishHTML([
+                        reportDir: 'coverage',
+                        reportFiles: 'index.html',
+                        reportName: 'Jest Coverage Report'
+                    ])
+                }
+            }
+        }
+
+        stage('Lint') {
+            steps {
+                script {
+                    echo "🔍 Running ESLint..."
+                    sh 'npm run lint'
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    echo "📊 Running SonarQube analysis..."
+                    sh '''
+                        npm install -g sonar-scanner
+                        sonar-scanner \
+                            -Dsonar.projectKey=task-frontend \
+                            -Dsonar.sources=src \
+                            -Dsonar.host.url=${SONARQUBE_HOST} \
+                            -Dsonar.login=${SONARQUBE_TOKEN} \
+                            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+                            -Dsonar.coverage.exclusions=**/*.test.js,**/node_modules/**
+                    '''
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    echo "🐳 Building Docker image..."
+                    sh '''
+                        docker build \
+                            -t ${DOCKER_IMAGE}:${DOCKER_TAG} \
+                            -t ${DOCKER_IMAGE}:staging-latest \
+                            -f Dockerfile .
+                    '''
+                }
+            }
+        }
+
+        stage('Trivy Security Scan') {
+            steps {
+                script {
+                    echo "🔐 Running Trivy vulnerability scan..."
+                    sh '''
+                        # Install Trivy if not present
+                        which trivy || (curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin)
+                        
+                        # Scan Docker image
+                        trivy image \
+                            --severity HIGH,CRITICAL \
+                            --exit-code 0 \
+                            --format json \
+                            --output trivy-report.json \
+                            ${DOCKER_IMAGE}:${DOCKER_TAG}
+                        
+                        # Display summary
+                        trivy image \
+                            --severity HIGH,CRITICAL \
+                            ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    '''
+                }
+            }
+            post {
+                always {
+                    // Archive Trivy report
+                    archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Push to Harbor') {
+            steps {
+                script {
+                    echo "📤 Pushing Docker image to Harbor..."
+                    sh '''
+                        # Login to Harbor
+                        echo ${HARBOR_CREDENTIALS_PSW} | docker login -u ${HARBOR_CREDENTIALS_USR} --password-stdin ${DOCKER_REGISTRY}
+                        
+                        # Push images
+                        docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                        docker push ${DOCKER_IMAGE}:staging-latest
+                        
+                        # Logout
+                        docker logout ${DOCKER_REGISTRY}
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                echo "🧹 Cleaning up..."
+                // Clean workspace
+                cleanWs()
+            }
+        }
+        success {
+            script {
+                echo "✅ Staging pipeline completed successfully!"
+                // Add notification (Slack, email, etc.)
+            }
+        }
+        failure {
+            script {
+                echo "❌ Staging pipeline failed!"
+                // Add notification (Slack, email, etc.)
+            }
+        }
+    }
+}
