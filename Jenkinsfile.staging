@@ -23,6 +23,7 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '10'))
         timeout(time: 1, unit: 'HOURS')
         timestamps()
+        disableConcurrentBuilds()
     }
 
     stages {
@@ -37,7 +38,8 @@ pipeline {
             steps {
                 echo "📦 Installing npm dependencies..."
                 sh '''
-                    npm install --include=dev
+                    # Use npm cache to speed up installs
+                    npm ci --include=dev --prefer-offline --no-audit
                     echo "Verifying Jest installation..."
                     npm list jest
                 '''
