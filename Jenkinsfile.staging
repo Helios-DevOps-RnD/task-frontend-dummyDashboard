@@ -15,9 +15,6 @@ pipeline {
         SONARQUBE_HOST = 'http://10.0.2.4:9000'
         SONARQUBE_TOKEN = credentials('sonarqube-token')  // Add this credential in Jenkins
         
-        // Harbor Credentials
-        HARBOR_CREDENTIALS = credentials('harbor-credentials')  // Add this credential in Jenkins
-        
         // Node Configuration
         NODE_ENV = 'production'
     }
@@ -146,10 +143,6 @@ pipeline {
     }
 
     post {
-        always {
-            echo "🧹 Cleaning up..."
-            cleanWs()
-        }
         success {
             echo "✅ Staging pipeline completed successfully!"
         }
