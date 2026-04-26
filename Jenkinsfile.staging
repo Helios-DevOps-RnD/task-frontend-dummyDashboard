@@ -80,8 +80,7 @@ pipeline {
             steps {
                 echo "📊 Running SonarQube analysis..."
                 sh '''
-                    npm install -g sonar-scanner
-                    sonar-scanner \
+                    npx sonar-scanner \
                         -Dsonar.projectKey=task-frontend \
                         -Dsonar.sources=src \
                         -Dsonar.host.url=${SONARQUBE_HOST} \
