@@ -7,7 +7,7 @@ pipeline {
     environment {
         // Docker & Harbor Configuration
         DOCKER_REGISTRY = 'harbor.example.com'  // Update with your Harbor registry
-        DOCKER_REPO = 'task-frontend'
+        DOCKER_REPO = 'hms/fe'
         DOCKER_IMAGE = "${DOCKER_REGISTRY}/${DOCKER_REPO}"
         COMMIT_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         DOCKER_TAG = "${COMMIT_HASH}-staging"
@@ -108,11 +108,17 @@ pipeline {
             steps {
                 echo "🔐 Running Trivy vulnerability scan..."
                 sh '''
-                    # Install Trivy if not present
-                    which trivy || (curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin)
+                    # Install Trivy to a Jenkins-writable directory
+                    TRIVY_DIR="${WORKSPACE}/.trivy"
+                    mkdir -p ${TRIVY_DIR}
+                    
+                    if [ ! -f ${TRIVY_DIR}/trivy ]; then
+                        echo "Installing Trivy..."
+                        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b ${TRIVY_DIR}
+                    fi
                     
                     # Scan Docker image
-                    trivy image \
+                    ${TRIVY_DIR}/trivy image \
                         --severity HIGH,CRITICAL \
                         --exit-code 0 \
                         --format json \
@@ -120,7 +126,7 @@ pipeline {
                         ${DOCKER_IMAGE}:${DOCKER_TAG}
                     
                     # Display summary
-                    trivy image \
+                    ${TRIVY_DIR}/trivy image \
                         --severity HIGH,CRITICAL \
                         ${DOCKER_IMAGE}:${DOCKER_TAG}
                 '''
