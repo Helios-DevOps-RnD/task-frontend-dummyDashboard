@@ -6,7 +6,7 @@ pipeline {
 
     environment {
         // Docker & Harbor Configuration
-        DOCKER_REGISTRY = 'harbor.example.com'  // Update with your Harbor registry
+        DOCKER_REGISTRY = 'registry.hms.evanlwp.my.id'  // Update with your Harbor registry
         DOCKER_REPO = 'hms/fe'
         DOCKER_IMAGE = "${DOCKER_REGISTRY}/${DOCKER_REPO}"
         COMMIT_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
