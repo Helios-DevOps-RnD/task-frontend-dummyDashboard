@@ -167,15 +167,17 @@ pipeline {
                         git config --global user.email "devops@helios.id"
                         git config --global user.name "Devops HIN"
                         
-                        # Setup Git credential helper
-                        git config --global credential.helper store
-                        
                         # Clone GitOps repository
                         GITOPS_DIR="${WORKSPACE}/gitops-hms-temp"
                         rm -rf ${GITOPS_DIR}
                         
-                        # Clone with credentials embedded in URL
-                        git clone https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Helios-DevOps-RnD/gitops-hms.git ${GITOPS_DIR}
+                        # URL encode the username and password to handle special characters
+                        # Use Python to properly encode credentials
+                        ENCODED_USERNAME=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${GIT_USERNAME}', safe=''))")
+                        ENCODED_PASSWORD=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${GIT_PASSWORD}', safe=''))")
+                        
+                        # Clone with encoded credentials
+                        git clone https://${ENCODED_USERNAME}:${ENCODED_PASSWORD}@github.com/Helios-DevOps-RnD/gitops-hms.git ${GITOPS_DIR}
                         
                         cd ${GITOPS_DIR}
                         
@@ -193,15 +195,12 @@ pipeline {
                         git add ${PATCH_FILE}
                         git commit -m "Update staging frontend image to ${COMMIT_HASH}" || echo "No changes to commit"
                         
-                        # Push with credentials in URL
-                        git push https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Helios-DevOps-RnD/gitops-hms.git main
+                        # Push with encoded credentials
+                        git push https://${ENCODED_USERNAME}:${ENCODED_PASSWORD}@github.com/Helios-DevOps-RnD/gitops-hms.git main
                         
                         # Cleanup
                         cd ${WORKSPACE}
                         rm -rf ${GITOPS_DIR}
-                        
-                        # Clear credential helper
-                        git config --global --unset credential.helper
                     '''
                 }
             }
