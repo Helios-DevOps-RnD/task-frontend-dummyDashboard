@@ -198,7 +198,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-100 p-8 text-black font-sans">
       <div className="max-w-5xl mx-auto space-y-6">
-        <h1 className="text-3xl font-bold text-center mb-8 text-black underline">Dashboard</h1>
+        <h1 className="text-3xl font-bold text-center mb-8 text-black underline">Dashboard Ajah</h1>
 
         {/* 1. Create User */}
         <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-300">
