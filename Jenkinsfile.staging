@@ -157,11 +157,53 @@ pipeline {
                 }
             }
         }
+
+        stage('Update GitOps Repository') {
+            steps {
+                echo "🔄 Updating GitOps repository with new image tag..."
+                withCredentials([usernamePassword(credentialsId: 'git-credentials-devops-hin', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD')]) {
+                    sh '''
+                        # Configure Git
+                        git config --global user.email "devops@helios.id"
+                        git config --global user.name "Devops HIN"
+                        
+                        # Clone GitOps repository
+                        GITOPS_DIR="${WORKSPACE}/gitops-hms-temp"
+                        rm -rf ${GITOPS_DIR}
+                        
+                        # Clone with credentials
+                        git clone https://github.com/Helios-DevOps-RnD/gitops-hms.git ${GITOPS_DIR}
+                        
+                        cd ${GITOPS_DIR}
+                        
+                        # Update patch-image.yaml with new tag
+                        PATCH_FILE="apps/hms-fe/overlays/staging/patch-image.yaml"
+                        
+                        # Update the image tag in the file
+                        sed -i "s|value: registry.hms.evanlwp.my.id/hms/fe:.*|value: ${DOCKER_IMAGE}:${COMMIT_HASH}|g" ${PATCH_FILE}
+                        
+                        # Verify the change
+                        echo "Updated patch-image.yaml:"
+                        cat ${PATCH_FILE}
+                        
+                        # Commit and push changes
+                        git add ${PATCH_FILE}
+                        git commit -m "Update staging frontend image to ${COMMIT_HASH}" || echo "No changes to commit"
+                        git push origin main
+                        
+                        # Cleanup
+                        cd ${WORKSPACE}
+                        rm -rf ${GITOPS_DIR}
+                    '''
+                }
+            }
+        }
     }
 
     post {
         success {
             echo "✅ Staging pipeline completed successfully!"
+            echo "🚀 Image ${DOCKER_IMAGE}:${COMMIT_HASH} deployed to staging"
         }
         failure {
             echo "❌ Staging pipeline failed!"
