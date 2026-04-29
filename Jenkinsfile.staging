@@ -10,7 +10,7 @@ pipeline {
         DOCKER_REPO = 'hms/fe'
         DOCKER_IMAGE = "${DOCKER_REGISTRY}/${DOCKER_REPO}"
         COMMIT_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-        DOCKER_TAG = "${COMMIT_HASH}-staging"
+        DOCKER_TAG = "${COMMIT_HASH}"  // Using commit hash only
         
         // SonarQube Configuration
         SONARQUBE_HOST = 'http://10.0.2.4:9000'
@@ -184,8 +184,8 @@ pipeline {
                         # Update patch-image.yaml with new tag
                         PATCH_FILE="apps/hms-fe/overlays/staging/patch-image.yaml"
                         
-                        # Update the image tag in the file
-                        sed -i "s|value: registry.hms.evanlwp.my.id/hms/fe:.*|value: ${DOCKER_IMAGE}:${COMMIT_HASH}|g" ${PATCH_FILE}
+                        # Update the image tag in the file (using DOCKER_TAG which includes -staging suffix)
+                        sed -i "s|value: registry.hms.evanlwp.my.id/hms/fe:.*|value: ${DOCKER_IMAGE}:${DOCKER_TAG}|g" ${PATCH_FILE}
                         
                         # Verify the change
                         echo "Updated patch-image.yaml:"
@@ -193,7 +193,7 @@ pipeline {
                         
                         # Commit and push changes
                         git add ${PATCH_FILE}
-                        git commit -m "Update staging frontend image to ${COMMIT_HASH}" || echo "No changes to commit"
+                        git commit -m "Update staging frontend image to ${DOCKER_TAG}" || echo "No changes to commit"
                         git push origin main
                         
                         # Cleanup
@@ -210,7 +210,7 @@ pipeline {
     post {
         success {
             echo "✅ Staging pipeline completed successfully!"
-            echo "🚀 Image ${DOCKER_IMAGE}:${COMMIT_HASH} deployed to staging"
+            echo "🚀 Image ${DOCKER_IMAGE}:${DOCKER_TAG} deployed to staging"
         }
         failure {
             echo "❌ Staging pipeline failed!"
