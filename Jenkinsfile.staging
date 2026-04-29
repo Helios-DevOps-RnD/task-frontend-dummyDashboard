@@ -161,23 +161,23 @@ pipeline {
         stage('Update GitOps Repository') {
             steps {
                 echo "🔄 Updating GitOps repository with new image tag..."
-                withCredentials([usernamePassword(credentialsId: 'git-credentials-devops-hin', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD')]) {
+                withCredentials([usernamePassword(credentialsId: 'git-credentials', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD')]) {
                     sh '''
                         # Configure Git
-                        git config --global user.email "devops@helios.id"
-                        git config --global user.name "Devops HIN"
+                        git config --global user.email "maulanaakbar.renaldi@gmail.com"
+                        git config --global user.name "maulanaakbrr"
                         
                         # Clone GitOps repository
                         GITOPS_DIR="${WORKSPACE}/gitops-hms-temp"
                         rm -rf ${GITOPS_DIR}
                         
-                        # URL encode the username and password to handle special characters
-                        # Use Python to properly encode credentials
-                        ENCODED_USERNAME=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${GIT_USERNAME}', safe=''))")
-                        ENCODED_PASSWORD=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${GIT_PASSWORD}', safe=''))")
+                        # Setup git credential helper with a temporary file
+                        CRED_FILE="${WORKSPACE}/.git-credentials"
+                        echo "https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com" > ${CRED_FILE}
+                        git config --global credential.helper "store --file=${CRED_FILE}"
                         
-                        # Clone with encoded credentials
-                        git clone https://${ENCODED_USERNAME}:${ENCODED_PASSWORD}@github.com/Helios-DevOps-RnD/gitops-hms.git ${GITOPS_DIR}
+                        # Clone repository
+                        git clone https://github.com/Helios-DevOps-RnD/gitops-hms.git ${GITOPS_DIR}
                         
                         cd ${GITOPS_DIR}
                         
@@ -194,13 +194,13 @@ pipeline {
                         # Commit and push changes
                         git add ${PATCH_FILE}
                         git commit -m "Update staging frontend image to ${COMMIT_HASH}" || echo "No changes to commit"
-                        
-                        # Push with encoded credentials
-                        git push https://${ENCODED_USERNAME}:${ENCODED_PASSWORD}@github.com/Helios-DevOps-RnD/gitops-hms.git main
+                        git push origin main
                         
                         # Cleanup
                         cd ${WORKSPACE}
                         rm -rf ${GITOPS_DIR}
+                        rm -f ${CRED_FILE}
+                        git config --global --unset credential.helper
                     '''
                 }
             }
