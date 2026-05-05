@@ -85,7 +85,7 @@ pipeline {
 
                         # Extract image tag from staging patch-image.yaml
                         STAGING_PATCH="${GITOPS_TEMP}/apps/hms-fe/overlays/staging/patch-image.yaml"
-                        STAGING_IMAGE=$(grep -oP 'value: \K.*' ${STAGING_PATCH} | head -1)
+                        STAGING_IMAGE=$(grep 'value:' ${STAGING_PATCH} | sed 's/.*value: //' | tr -d ' ')
 
                         echo "📦 Latest staging image: ${STAGING_IMAGE}"
                         echo "${STAGING_IMAGE}" > ${WORKSPACE}/staging-image.txt
