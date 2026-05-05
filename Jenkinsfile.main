@@ -81,10 +81,21 @@ pipeline {
                         # Get the latest image tag from staging gitops repository
                         GITOPS_TEMP="${WORKSPACE}/gitops-query-temp"
                         rm -rf ${GITOPS_TEMP}
-                        git clone ${GITOPS_REPO_URL} ${GITOPS_TEMP}
+                        
+                        # Clone using HTTPS without auth (public repo)
+                        git clone https://github.com/Helios-DevOps-RnD/gitops-hms.git ${GITOPS_TEMP} 2>&1 || {
+                            echo "❌ Failed to clone gitops repository"
+                            exit 1
+                        }
 
                         # Extract image tag from staging patch-image.yaml
                         STAGING_PATCH="${GITOPS_TEMP}/apps/hms-fe/overlays/staging/patch-image.yaml"
+                        
+                        if [ ! -f "${STAGING_PATCH}" ]; then
+                            echo "❌ File not found: ${STAGING_PATCH}"
+                            exit 1
+                        fi
+                        
                         STAGING_IMAGE=$(grep 'value:' ${STAGING_PATCH} | sed 's/.*value: //' | tr -d ' ')
 
                         echo "📦 Latest staging image: ${STAGING_IMAGE}"
@@ -322,11 +333,21 @@ pipeline {
                         echo "https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com" > ${CRED_FILE}
                         git config --global credential.helper "store --file=${CRED_FILE}"
 
-                        git clone ${GITOPS_REPO_URL} ${GITOPS_DIR}
+                        # Clone with credentials
+                        git clone https://github.com/Helios-DevOps-RnD/gitops-hms.git ${GITOPS_DIR} 2>&1 || {
+                            echo "❌ Failed to clone gitops repository"
+                            exit 1
+                        }
+                        
                         cd ${GITOPS_DIR}
 
                         # ---- Update patch-image.yaml in production ----
                         PATCH_FILE="${OVERLAY_DIR}/patch-image.yaml"
+                        
+                        if [ ! -f "${PATCH_FILE}" ]; then
+                            echo "❌ File not found: ${PATCH_FILE}"
+                            exit 1
+                        fi
                         
                         # Replace the image value with approved image
                         sed -i "s|value: .*|value: ${APPROVED_IMAGE}|g" ${PATCH_FILE}
@@ -346,7 +367,10 @@ Promoted from staging to production
 Build #: ${BUILD_NUMBER}
 Build URL: ${BUILD_URL}
 Approved by: Jenkins Promotion Pipeline"
-                            git push origin main
+                            git push origin main 2>&1 || {
+                                echo "❌ Failed to push to gitops repository"
+                                exit 1
+                            }
                             echo "✅ Pushed production update to gitops-hms"
                         fi
 
