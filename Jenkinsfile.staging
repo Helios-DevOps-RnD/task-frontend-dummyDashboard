@@ -32,6 +32,24 @@ pipeline {
             steps {
                 echo "🔄 Checking out code from staging branch..."
                 checkout scm
+                
+                script {
+                    // Get commit author info
+                    env.COMMIT_AUTHOR = sh(script: 'git log -1 --pretty=%an', returnStdout: true).trim()
+                    env.COMMIT_EMAIL = sh(script: 'git log -1 --pretty=%ae', returnStdout: true).trim()
+                    env.COMMIT_MESSAGE = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    env.COMMIT_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    
+                    echo "════════════════════════════════════════"
+                    echo "📋 Build Information"
+                    echo "════════════════════════════════════════"
+                    echo "👤 Triggered by: ${COMMIT_AUTHOR}"
+                    echo "📧 Email: ${COMMIT_EMAIL}"
+                    echo "💬 Message: ${COMMIT_MESSAGE}"
+                    echo "🔗 Commit: ${COMMIT_HASH}"
+                    echo "🏗️  Build #: ${BUILD_NUMBER}"
+                    echo "════════════════════════════════════════"
+                }
             }
         }
 
@@ -207,11 +225,25 @@ pipeline {
 
     post {
         success {
-            echo "✅ Staging pipeline completed successfully!"
-            echo "🚀 Image ${DOCKER_IMAGE}:${DOCKER_TAG} deployed to staging"
+            script {
+                echo "════════════════════════════════════════"
+                echo "✅ Staging pipeline completed successfully!"
+                echo "════════════════════════════════════════"
+                echo "👤 Triggered by: ${COMMIT_AUTHOR}"
+                echo "🚀 Image: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                echo "🔗 Build URL: ${BUILD_URL}"
+                echo "════════════════════════════════════════"
+            }
         }
         failure {
-            echo "❌ Staging pipeline failed!"
+            script {
+                echo "════════════════════════════════════════"
+                echo "❌ Staging pipeline failed!"
+                echo "════════════════════════════════════════"
+                echo "👤 Triggered by: ${COMMIT_AUTHOR}"
+                echo "🔗 Build URL: ${BUILD_URL}"
+                echo "════════════════════════════════════════"
+            }
         }
     }
 }
