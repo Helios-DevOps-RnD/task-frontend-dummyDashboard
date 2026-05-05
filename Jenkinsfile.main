@@ -1,203 +1,205 @@
-// Jenkins Pipeline for Main Branch
-// Stages: Unit Tests (Jest) → Build Docker → Push to Harbor → Deploy
+// Jenkins Pipeline for Main Branch (Production)
+// Stages: Query Staging Image → Approval → Update GitOps → Deploy to Production
+// This is a PROMOTION pipeline that promotes the latest staging image to production
 
 pipeline {
     agent any
 
     environment {
-        // Docker & Harbor Configuration
-        DOCKER_REGISTRY = 'harbor.example.com'  // Update with your Harbor registry
-        DOCKER_REPO = 'task-frontend'
-        DOCKER_IMAGE = "${DOCKER_REGISTRY}/${DOCKER_REPO}"
-        DOCKER_TAG = "${BUILD_NUMBER}-main"
-        
-        // Harbor Credentials
-        HARBOR_CREDENTIALS = credentials('harbor-credentials')  // Add this credential in Jenkins
-        
-        // Deployment Configuration
-        DEPLOY_HOST = 'your-deploy-server.com'  // Update with your deployment server
-        DEPLOY_USER = 'deploy'
-        DEPLOY_PATH = '/opt/task-frontend'
-        
-        // Node Configuration
-        NODE_ENV = 'production'
+        // ---------- Docker & Harbor ----------
+        DOCKER_REGISTRY = 'registry.hms.evanlwp.my.id'
+        DOCKER_REPO     = 'hms/fe'
+        DOCKER_IMAGE    = "${DOCKER_REGISTRY}/${DOCKER_REPO}"
+
+        // ---------- GitOps Configuration ----------
+        GITOPS_REPO_URL = 'https://github.com/Helios-DevOps-RnD/gitops-hms.git'
+        OVERLAY_DIR     = 'apps/hms-fe/overlays/production'
     }
 
     options {
         buildDiscarder(logRotator(numToKeepStr: '20'))
-        timeout(time: 1, unit: 'HOURS')
+        timeout(time: 2, unit: 'HOURS')
         timestamps()
+        disableConcurrentBuilds()
     }
 
     stages {
-        stage('Checkout') {
+        // =====================================================================
+        // 1. QUERY LATEST STAGING IMAGE
+        // =====================================================================
+        stage('Query Latest Staging Image') {
             steps {
-                script {
-                    echo "🔄 Checking out code from main branch..."
-                    checkout scm
-                }
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                script {
-                    echo "📦 Installing npm dependencies..."
-                    sh 'npm ci'
-                }
-            }
-        }
-
-        stage('Unit Tests (Jest)') {
-            steps {
-                script {
-                    echo "🧪 Running Jest unit tests..."
-                    sh 'npm test -- --coverage --watchAll=false'
-                }
-            }
-            post {
-                always {
-                    // Publish test results
-                    junit 'coverage/junit.xml'
-                    
-                    // Publish coverage reports
-                    publishHTML([
-                        reportDir: 'coverage',
-                        reportFiles: 'index.html',
-                        reportName: 'Jest Coverage Report'
-                    ])
-                }
-            }
-        }
-
-        stage('Lint') {
-            steps {
-                script {
-                    echo "🔍 Running ESLint..."
-                    sh 'npm run lint'
-                }
-            }
-        }
-
-        stage('Build Application') {
-            steps {
-                script {
-                    echo "🔨 Building Next.js application..."
-                    sh 'npm run build'
-                }
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                script {
-                    echo "🐳 Building Docker image..."
+                echo "� Querying latest image from staging deployment..."
+                withCredentials([usernamePassword(
+                    credentialsId:    'harbor-credentials',
+                    usernameVariable: 'HARBOR_USERNAME',
+                    passwordVariable: 'HARBOR_PASSWORD'
+                )]) {
                     sh '''
-                        docker build \
-                            -t ${DOCKER_IMAGE}:${DOCKER_TAG} \
-                            -t ${DOCKER_IMAGE}:main-latest \
-                            -t ${DOCKER_IMAGE}:latest \
-                            -f Dockerfile .
-                    '''
-                }
-            }
-        }
+                        set -eu
 
-        stage('Push to Harbor') {
-            steps {
-                script {
-                    echo "📤 Pushing Docker image to Harbor..."
-                    sh '''
                         # Login to Harbor
-                        echo ${HARBOR_CREDENTIALS_PSW} | docker login -u ${HARBOR_CREDENTIALS_USR} --password-stdin ${DOCKER_REGISTRY}
-                        
-                        # Push images
-                        docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
-                        docker push ${DOCKER_IMAGE}:main-latest
-                        docker push ${DOCKER_IMAGE}:latest
-                        
-                        # Logout
+                        echo ${HARBOR_PASSWORD} | docker login -u ${HARBOR_USERNAME} --password-stdin ${DOCKER_REGISTRY}
+
+                        # Get the latest image tag from staging gitops repository
+                        GITOPS_TEMP="${WORKSPACE}/gitops-query-temp"
+                        rm -rf ${GITOPS_TEMP}
+                        git clone ${GITOPS_REPO_URL} ${GITOPS_TEMP}
+
+                        # Extract image tag from staging patch-image.yaml
+                        STAGING_PATCH="${GITOPS_TEMP}/apps/hms-fe/overlays/staging/patch-image.yaml"
+                        STAGING_IMAGE=$(grep -oP 'value: \K.*' ${STAGING_PATCH} | head -1)
+
+                        echo "📦 Latest staging image: ${STAGING_IMAGE}"
+                        echo "${STAGING_IMAGE}" > ${WORKSPACE}/staging-image.txt
+
+                        # Verify image exists in Harbor
+                        IMAGE_TAG=$(echo ${STAGING_IMAGE} | cut -d: -f2)
+                        docker pull ${STAGING_IMAGE} || {
+                            echo "❌ Failed to pull image ${STAGING_IMAGE}"
+                            exit 1
+                        }
+
+                        echo "✅ Image verified in Harbor"
+
+                        # Cleanup
+                        rm -rf ${GITOPS_TEMP}
                         docker logout ${DOCKER_REGISTRY}
                     '''
                 }
-            }
-        }
-
-        stage('Deploy to Production') {
-            when {
-                branch 'main'
-            }
-            steps {
                 script {
-                    echo "🚀 Deploying to production..."
-                    sh '''
-                        # Deploy using SSH (requires SSH key configured in Jenkins)
-                        ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST} << 'EOF'
-                            cd ${DEPLOY_PATH}
-                            
-                            # Login to Harbor
-                            echo ${HARBOR_CREDENTIALS_PSW} | docker login -u ${HARBOR_CREDENTIALS_USR} --password-stdin ${DOCKER_REGISTRY}
-                            
-                            # Pull latest image
-                            docker pull ${DOCKER_IMAGE}:latest
-                            
-                            # Stop and remove old container
-                            docker stop task-frontend || true
-                            docker rm task-frontend || true
-                            
-                            # Run new container
-                            docker run -d \
-                                --name task-frontend \
-                                -p 3000:3000 \
-                                --restart unless-stopped \
-                                ${DOCKER_IMAGE}:latest
-                            
-                            # Logout
-                            docker logout ${DOCKER_REGISTRY}
-                        EOF
-                    '''
+                    env.STAGING_IMAGE = readFile("${WORKSPACE}/staging-image.txt").trim()
+                    echo "🎯 Will promote: ${STAGING_IMAGE}"
                 }
             }
         }
 
-        stage('Smoke Tests') {
-            when {
-                branch 'main'
-            }
+        // =====================================================================
+        // 2. APPROVAL STAGE
+        // =====================================================================
+        stage('Approval for Production Promotion') {
             steps {
                 script {
-                    echo "🔥 Running smoke tests..."
+                    def userInput = input(
+                        id: 'ProductionApproval',
+                        message: "Promote to Production?",
+                        parameters: [
+                            string(
+                                name: 'IMAGE_TAG',
+                                defaultValue: "${STAGING_IMAGE}",
+                                description: 'Docker image to promote to production (can be modified)'
+                            ),
+                            booleanParam(
+                                name: 'CONFIRM_PROMOTION',
+                                defaultValue: false,
+                                description: 'Check to confirm promotion to production'
+                            )
+                        ]
+                    )
+
+                    if (!userInput.CONFIRM_PROMOTION) {
+                        error("❌ Production promotion cancelled by user")
+                    }
+
+                    env.APPROVED_IMAGE = userInput.IMAGE_TAG
+                    echo "✅ Approved for production: ${APPROVED_IMAGE}"
+                }
+            }
+        }
+
+        // =====================================================================
+        // 3. UPDATE GITOPS REPOSITORY
+        //    Update patch-image.yaml in production overlay with approved image
+        // =====================================================================
+        stage('Update GitOps Repository') {
+            steps {
+                echo "� Updating GitOps repository with approved image..."
+                withCredentials([usernamePassword(
+                    credentialsId:    'git-credentials',
+                    usernameVariable: 'GIT_USERNAME',
+                    passwordVariable: 'GIT_PASSWORD'
+                )]) {
                     sh '''
-                        # Wait for service to be ready
-                        sleep 10
+                        set -eu
+
+                        # Configure Git identity for the bot commit
+                        git config --global user.email "jenkins-bot@hms.evanlwp.my.id"
+                        git config --global user.name  "HMS Jenkins Bot"
+
+                        # Fresh clone — avoid stale local state across builds
+                        GITOPS_DIR="${WORKSPACE}/gitops-hms-temp"
+                        rm -rf ${GITOPS_DIR}
+
+                        # Set up credential helper from temp file
+                        CRED_FILE="${WORKSPACE}/.git-credentials"
+                        echo "https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com" > ${CRED_FILE}
+                        git config --global credential.helper "store --file=${CRED_FILE}"
+
+                        git clone ${GITOPS_REPO_URL} ${GITOPS_DIR}
+                        cd ${GITOPS_DIR}
+
+                        # ---- Update patch-image.yaml in production ----
+                        PATCH_FILE="${OVERLAY_DIR}/patch-image.yaml"
                         
-                        # Check if service is responding
-                        curl -f http://localhost:3000 || exit 1
-                        echo "✅ Service is responding"
+                        # Replace the image value with approved image
+                        sed -i "s|value: .*|value: ${APPROVED_IMAGE}|g" ${PATCH_FILE}
+                        
+                        echo "Updated patch-image.yaml:"
+                        cat ${PATCH_FILE}
+
+                        # ---- Commit + push ----
+                        git add ${PATCH_FILE}
+
+                        if git diff --cached --quiet; then
+                            echo "[gitops] No changes to commit."
+                        else
+                            git commit -m "ci(hms-fe-production): promote ${APPROVED_IMAGE}
+
+Promoted from staging to production
+Build URL: ${BUILD_URL}
+Approved by: Jenkins Promotion Pipeline"
+                            git push origin main
+                            echo "✅ Pushed production update to gitops-hms"
+                        fi
+
+                        # Cleanup
+                        cd ${WORKSPACE}
+                        rm -rf ${GITOPS_DIR}
+                        rm -f ${CRED_FILE}
+                        git config --global --unset credential.helper
                     '''
                 }
             }
         }
     }
 
+    // =========================================================================
+    // POST ACTIONS
+    // =========================================================================
     post {
-        always {
-            script {
-                echo "🧹 Cleaning up..."
-                cleanWs()
-            }
-        }
         success {
             script {
-                echo "✅ Main pipeline completed successfully!"
-                // Add notification (Slack, email, etc.)
+                echo "════════════════════════════════════════"
+                echo "✅ Production promotion completed successfully!"
+                echo "════════════════════════════════════════"
+                echo "🎯 Promoted Image: ${APPROVED_IMAGE}"
+                echo "📍 Target: apps/hms-fe/overlays/production"
+                echo "🔗 Build URL: ${BUILD_URL}"
+                echo "════════════════════════════════════════"
             }
         }
         failure {
             script {
-                echo "❌ Main pipeline failed!"
-                // Add notification (Slack, email, etc.)
+                echo "════════════════════════════════════════"
+                echo "❌ Production promotion failed!"
+                echo "════════════════════════════════════════"
+                echo "🔗 Build URL: ${BUILD_URL}"
+                echo "════════════════════════════════════════"
             }
+        }
+        always {
+            // Cleanup temporary files
+            sh 'rm -f ${WORKSPACE}/staging-image.txt || true'
         }
     }
 }
