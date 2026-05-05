@@ -1,0 +1,448 @@
+// Jenkins Pipeline for Main Branch (Production)
+// Stages: Query Staging Image → Approval → Update GitOps → Deploy to Production
+// This is a PROMOTION pipeline that promotes the latest staging image to production
+// Triggered automatically after PR merge to main branch
+
+pipeline {
+    agent any
+
+    environment {
+        // ---------- Docker & Harbor ----------
+        DOCKER_REGISTRY = 'registry.hms.evanlwp.my.id'
+        DOCKER_REPO     = 'hms/fe'
+        DOCKER_IMAGE    = "${DOCKER_REGISTRY}/${DOCKER_REPO}"
+
+        // ---------- GitOps Configuration ----------
+        GITOPS_REPO_URL = 'https://github.com/Helios-DevOps-RnD/gitops-hms.git'
+        OVERLAY_DIR     = 'apps/hms-fe/overlays/production'
+
+        // ---------- Email Configuration ----------
+        EMAIL_RECIPIENTS = 'devops@helios.id'
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+        timeout(time: 2, unit: 'HOURS')
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    triggers {
+        // Trigger automatically when main branch is updated (after PR merge)
+        githubPush()
+    }
+
+    stages {
+        // =====================================================================
+        // 1. CHECKOUT
+        // =====================================================================
+        stage('Checkout') {
+            steps {
+                echo "🔄 Checking out code from main branch..."
+                checkout scm
+                
+                script {
+                    // Get commit info
+                    env.COMMIT_AUTHOR = sh(script: 'git log -1 --pretty=%an', returnStdout: true).trim()
+                    env.COMMIT_EMAIL = sh(script: 'git log -1 --pretty=%ae', returnStdout: true).trim()
+                    env.COMMIT_MESSAGE = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    env.COMMIT_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    
+                    echo "════════════════════════════════════════"
+                    echo "📋 Build Information"
+                    echo "════════════════════════════════════════"
+                    echo "👤 Triggered by: ${COMMIT_AUTHOR}"
+                    echo "📧 Email: ${COMMIT_EMAIL}"
+                    echo "💬 Message: ${COMMIT_MESSAGE}"
+                    echo "🔗 Commit: ${COMMIT_HASH}"
+                    echo "🏗️  Build #: ${BUILD_NUMBER}"
+                    echo "════════════════════════════════════════"
+                }
+            }
+        }
+
+        // =====================================================================
+        // 2. QUERY LATEST STAGING IMAGE
+        // =====================================================================
+        stage('Query Latest Staging Image') {
+            steps {
+                echo "🔍 Querying latest image from staging deployment..."
+                withCredentials([usernamePassword(
+                    credentialsId:    'harbor-credentials',
+                    usernameVariable: 'HARBOR_USERNAME',
+                    passwordVariable: 'HARBOR_PASSWORD'
+                )]) {
+                    sh '''
+                        set -eu
+
+                        # Login to Harbor
+                        echo ${HARBOR_PASSWORD} | docker login -u ${HARBOR_USERNAME} --password-stdin ${DOCKER_REGISTRY}
+
+                        # Get the latest image tag from staging gitops repository
+                        GITOPS_TEMP="${WORKSPACE}/gitops-query-temp"
+                        rm -rf ${GITOPS_TEMP}
+                        git clone ${GITOPS_REPO_URL} ${GITOPS_TEMP}
+
+                        # Extract image tag from staging patch-image.yaml
+                        STAGING_PATCH="${GITOPS_TEMP}/apps/hms-fe/overlays/staging/patch-image.yaml"
+                        STAGING_IMAGE=$(grep -oP 'value: \K.*' ${STAGING_PATCH} | head -1)
+
+                        echo "📦 Latest staging image: ${STAGING_IMAGE}"
+                        echo "${STAGING_IMAGE}" > ${WORKSPACE}/staging-image.txt
+
+                        # Verify image exists in Harbor
+                        docker pull ${STAGING_IMAGE} || {
+                            echo "❌ Failed to pull image ${STAGING_IMAGE}"
+                            exit 1
+                        }
+
+                        echo "✅ Image verified in Harbor"
+
+                        # Cleanup
+                        rm -rf ${GITOPS_TEMP}
+                        docker logout ${DOCKER_REGISTRY}
+                    '''
+                }
+                script {
+                    env.STAGING_IMAGE = readFile("${WORKSPACE}/staging-image.txt").trim()
+                    echo "🎯 Will promote: ${STAGING_IMAGE}"
+                }
+            }
+        }
+
+        // =====================================================================
+        // 3. SEND APPROVAL REMINDER EMAIL
+        // =====================================================================
+        stage('Send Approval Reminder') {
+            steps {
+                echo "📧 Sending approval reminder email..."
+                script {
+                    def emailBody = """
+                    <html>
+                        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                            <div style="max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-radius: 8px; padding: 20px;">
+                                <h2 style="color: #0066cc; border-bottom: 2px solid #0066cc; padding-bottom: 10px;">
+                                    🚀 Production Promotion Approval Required
+                                </h2>
+                                
+                                <p><strong>Frontend (hms-fe) Production Deployment</strong></p>
+                                
+                                <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                                    <p><strong>📦 Image to Promote:</strong></p>
+                                    <code style="background-color: #fff; padding: 10px; display: block; border-left: 3px solid #0066cc; word-break: break-all;">
+                                        ${STAGING_IMAGE}
+                                    </code>
+                                </div>
+
+                                <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                                    <p><strong>📋 Build Details:</strong></p>
+                                    <ul style="margin: 10px 0; padding-left: 20px;">
+                                        <li><strong>Build #:</strong> ${BUILD_NUMBER}</li>
+                                        <li><strong>Triggered by:</strong> ${COMMIT_AUTHOR}</li>
+                                        <li><strong>Commit:</strong> ${COMMIT_HASH}</li>
+                                        <li><strong>Message:</strong> ${COMMIT_MESSAGE}</li>
+                                    </ul>
+                                </div>
+
+                                <div style="margin: 20px 0;">
+                                    <p><strong>⏱️ Action Required:</strong></p>
+                                    <p>Please review and approve this production promotion within the next <strong>24 hours</strong>.</p>
+                                </div>
+
+                                <div style="text-align: center; margin: 20px 0;">
+                                    <a href="${BUILD_URL}input" style="display: inline-block; background-color: #0066cc; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                                        👉 Review & Approve
+                                    </a>
+                                </div>
+
+                                <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                                
+                                <div style="font-size: 12px; color: #666;">
+                                    <p><strong>Build URL:</strong> <a href="${BUILD_URL}">${BUILD_URL}</a></p>
+                                    <p><strong>Target:</strong> apps/hms-fe/overlays/production</p>
+                                    <p style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">
+                                        This is an automated message from HMS Jenkins Pipeline. Please do not reply to this email.
+                                    </p>
+                                </div>
+                            </div>
+                        </body>
+                    </html>
+                    """
+
+                    emailext(
+                        subject: "🚀 [HMS-FE] Production Promotion Approval Required - Build #${BUILD_NUMBER}",
+                        body: emailBody,
+                        mimeType: 'text/html',
+                        to: "${EMAIL_RECIPIENTS}",
+                        recipientProviders: [
+                            developers(),
+                            requestor(),
+                            brokenBuildSuspects()
+                        ]
+                    )
+                }
+            }
+        }
+
+        // =====================================================================
+        // 4. APPROVAL STAGE
+        // =====================================================================
+        stage('Approval for Production Promotion') {
+            steps {
+                script {
+                    def userInput = input(
+                        id: 'ProductionApproval',
+                        message: "🚀 Promote to Production?",
+                        parameters: [
+                            string(
+                                name: 'IMAGE_TAG',
+                                defaultValue: "${STAGING_IMAGE}",
+                                description: 'Docker image to promote to production (can be modified if needed)'
+                            ),
+                            choice(
+                                name: 'APPROVAL_STATUS',
+                                choices: ['APPROVE', 'REJECT'],
+                                description: 'Select APPROVE to proceed with production promotion'
+                            ),
+                            string(
+                                name: 'APPROVAL_NOTES',
+                                defaultValue: '',
+                                description: 'Optional notes for this approval/rejection'
+                            )
+                        ]
+                    )
+
+                    if (userInput.APPROVAL_STATUS == 'REJECT') {
+                        error("❌ Production promotion rejected by approver. Notes: ${userInput.APPROVAL_NOTES}")
+                    }
+
+                    env.APPROVED_IMAGE = userInput.IMAGE_TAG
+                    env.APPROVAL_NOTES = userInput.APPROVAL_NOTES
+                    echo "✅ Approved for production: ${APPROVED_IMAGE}"
+                    if (userInput.APPROVAL_NOTES) {
+                        echo "📝 Approval Notes: ${APPROVAL_NOTES}"
+                    }
+                }
+            }
+        }
+
+        // =====================================================================
+        // 5. SEND APPROVAL CONFIRMATION EMAIL
+        // =====================================================================
+        stage('Send Approval Confirmation') {
+            steps {
+                echo "📧 Sending approval confirmation email..."
+                script {
+                    def emailBody = """
+                    <html>
+                        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                            <div style="max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-radius: 8px; padding: 20px;">
+                                <h2 style="color: #28a745; border-bottom: 2px solid #28a745; padding-bottom: 10px;">
+                                    ✅ Production Promotion Approved
+                                </h2>
+                                
+                                <p><strong>Frontend (hms-fe) Production Deployment</strong></p>
+                                
+                                <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                                    <p><strong>📦 Promoted Image:</strong></p>
+                                    <code style="background-color: #fff; padding: 10px; display: block; border-left: 3px solid #28a745; word-break: break-all;">
+                                        ${APPROVED_IMAGE}
+                                    </code>
+                                </div>
+
+                                <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                                    <p><strong>📋 Deployment Details:</strong></p>
+                                    <ul style="margin: 10px 0; padding-left: 20px;">
+                                        <li><strong>Build #:</strong> ${BUILD_NUMBER}</li>
+                                        <li><strong>Target:</strong> apps/hms-fe/overlays/production</li>
+                                        <li><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">APPROVED</span></li>
+                                    </ul>
+                                </div>
+
+                                ${APPROVAL_NOTES ? '<div style="background-color: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 3px solid #ffc107;"><p><strong>📝 Approval Notes:</strong></p><p>' + APPROVAL_NOTES + '</p></div>' : ''}
+
+                                <div style="margin: 20px 0;">
+                                    <p><strong>⏱️ Next Steps:</strong></p>
+                                    <p>GitOps repository has been updated. ArgoCD will automatically sync and deploy to production cluster within the next few minutes.</p>
+                                </div>
+
+                                <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                                
+                                <div style="font-size: 12px; color: #666;">
+                                    <p><strong>Build URL:</strong> <a href="${BUILD_URL}">${BUILD_URL}</a></p>
+                                    <p style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">
+                                        This is an automated message from HMS Jenkins Pipeline. Please do not reply to this email.
+                                    </p>
+                                </div>
+                            </div>
+                        </body>
+                    </html>
+                    """
+
+                    emailext(
+                        subject: "✅ [HMS-FE] Production Promotion Approved - Build #${BUILD_NUMBER}",
+                        body: emailBody,
+                        mimeType: 'text/html',
+                        to: "${EMAIL_RECIPIENTS}",
+                        recipientProviders: [
+                            developers(),
+                            requestor(),
+                            brokenBuildSuspects()
+                        ]
+                    )
+                }
+            }
+        }
+
+        // =====================================================================
+        // 6. UPDATE GITOPS REPOSITORY
+        //    Update patch-image.yaml in production overlay with approved image
+        // =====================================================================
+        stage('Update GitOps Repository') {
+            steps {
+                echo "🔄 Updating GitOps repository with approved image..."
+                withCredentials([usernamePassword(
+                    credentialsId:    'git-credentials',
+                    usernameVariable: 'GIT_USERNAME',
+                    passwordVariable: 'GIT_PASSWORD'
+                )]) {
+                    sh '''
+                        set -eu
+
+                        # Configure Git identity for the bot commit
+                        git config --global user.email "jenkins-bot@hms.evanlwp.my.id"
+                        git config --global user.name  "HMS Jenkins Bot"
+
+                        # Fresh clone — avoid stale local state across builds
+                        GITOPS_DIR="${WORKSPACE}/gitops-hms-temp"
+                        rm -rf ${GITOPS_DIR}
+
+                        # Set up credential helper from temp file
+                        CRED_FILE="${WORKSPACE}/.git-credentials"
+                        echo "https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com" > ${CRED_FILE}
+                        git config --global credential.helper "store --file=${CRED_FILE}"
+
+                        git clone ${GITOPS_REPO_URL} ${GITOPS_DIR}
+                        cd ${GITOPS_DIR}
+
+                        # ---- Update patch-image.yaml in production ----
+                        PATCH_FILE="${OVERLAY_DIR}/patch-image.yaml"
+                        
+                        # Replace the image value with approved image
+                        sed -i "s|value: .*|value: ${APPROVED_IMAGE}|g" ${PATCH_FILE}
+                        
+                        echo "Updated patch-image.yaml:"
+                        cat ${PATCH_FILE}
+
+                        # ---- Commit + push ----
+                        git add ${PATCH_FILE}
+
+                        if git diff --cached --quiet; then
+                            echo "[gitops] No changes to commit."
+                        else
+                            git commit -m "ci(hms-fe-production): promote ${APPROVED_IMAGE}
+
+Promoted from staging to production
+Build #: ${BUILD_NUMBER}
+Build URL: ${BUILD_URL}
+Approved by: Jenkins Promotion Pipeline"
+                            git push origin main
+                            echo "✅ Pushed production update to gitops-hms"
+                        fi
+
+                        # Cleanup
+                        cd ${WORKSPACE}
+                        rm -rf ${GITOPS_DIR}
+                        rm -f ${CRED_FILE}
+                        git config --global --unset credential.helper
+                    '''
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // POST ACTIONS
+    // =========================================================================
+    post {
+        success {
+            script {
+                echo "════════════════════════════════════════"
+                echo "✅ Production promotion completed successfully!"
+                echo "════════════════════════════════════════"
+                echo "🎯 Promoted Image: ${APPROVED_IMAGE}"
+                echo "📍 Target: apps/hms-fe/overlays/production"
+                echo "🔗 Build URL: ${BUILD_URL}"
+                echo "════════════════════════════════════════"
+            }
+        }
+        failure {
+            script {
+                echo "════════════════════════════════════════"
+                echo "❌ Production promotion failed!"
+                echo "════════════════════════════════════════"
+                echo "🔗 Build URL: ${BUILD_URL}"
+                echo "════════════════════════════════════════"
+
+                // Send failure notification email
+                def emailBody = """
+                <html>
+                    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                        <div style="max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-radius: 8px; padding: 20px;">
+                            <h2 style="color: #dc3545; border-bottom: 2px solid #dc3545; padding-bottom: 10px;">
+                                ❌ Production Promotion Failed
+                            </h2>
+                            
+                            <p><strong>Frontend (hms-fe) Production Deployment</strong></p>
+                            
+                            <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                                <p><strong>📋 Build Details:</strong></p>
+                                <ul style="margin: 10px 0; padding-left: 20px;">
+                                    <li><strong>Build #:</strong> ${BUILD_NUMBER}</li>
+                                    <li><strong>Status:</strong> <span style="color: #dc3545; font-weight: bold;">FAILED</span></li>
+                                </ul>
+                            </div>
+
+                            <div style="margin: 20px 0;">
+                                <p><strong>⚠️ Action Required:</strong></p>
+                                <p>Please check the build logs and investigate the failure.</p>
+                            </div>
+
+                            <div style="text-align: center; margin: 20px 0;">
+                                <a href="${BUILD_URL}console" style="display: inline-block; background-color: #dc3545; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                                    👉 View Build Logs
+                                </a>
+                            </div>
+
+                            <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                            
+                            <div style="font-size: 12px; color: #666;">
+                                <p><strong>Build URL:</strong> <a href="${BUILD_URL}">${BUILD_URL}</a></p>
+                                <p style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">
+                                    This is an automated message from HMS Jenkins Pipeline. Please do not reply to this email.
+                                </p>
+                            </div>
+                        </div>
+                    </body>
+                </html>
+                """
+
+                emailext(
+                    subject: "❌ [HMS-FE] Production Promotion Failed - Build #${BUILD_NUMBER}",
+                    body: emailBody,
+                    mimeType: 'text/html',
+                    to: "${EMAIL_RECIPIENTS}",
+                    recipientProviders: [
+                        developers(),
+                        requestor(),
+                        brokenBuildSuspects()
+                    ]
+                )
+            }
+        }
+        always {
+            // Cleanup temporary files
+            sh 'rm -f ${WORKSPACE}/staging-image.txt || true'
+        }
+    }
+}
