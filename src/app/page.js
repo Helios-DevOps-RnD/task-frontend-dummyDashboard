@@ -4,8 +4,15 @@ import { useState } from 'react';
 import axios from 'axios';
 
 export default function Home() {
-  const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001') + '/api';
-  const Create_URL = (process.env.NEXT_PUBLIC_PUBSUB_URL || 'http://localhost:3002') + '/api';
+  // Runtime env injection: values come from /public/env-config.js which is
+  // (re)generated at container start by entrypoint.sh from the k8s ConfigMap.
+  // Dev (`next dev`): public/env-config.js is committed with empty __ENV__,
+  // so you can point to localhost by setting window.__ENV__ manually or just
+  // hardcoding for local testing. In k8s, entrypoint.sh overwrites it.
+  const API_URL =
+    (typeof window !== 'undefined' && window.__ENV__?.API_URL) || '';
+  const Create_URL =
+    (typeof window !== 'undefined' && window.__ENV__?.CREATE_URL) || '';
 
   // State Users
   const [users, setUsers] = useState([]);
@@ -49,7 +56,7 @@ export default function Home() {
   // ==========================================
   const fetchAllUsers = async () => {
     try {
-      const response = await axios.get(`${API_URL}/users`);
+      const response = await axios.get(`${API_URL}/api/users`);
       setUsers(response.data.data || []);
       setShowUsers(true);
     } catch (error) {
@@ -61,7 +68,7 @@ export default function Home() {
   const handleCreateUser = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${Create_URL}/users`, 
+      await axios.post(`${Create_URL}/api/users`,
         { username: createUsername, full_name: createFullName, email_address: createEmailAddress, password: createPassword });
       alert('User berhasil di buat!');
 
@@ -80,7 +87,7 @@ export default function Home() {
   const handleGetUserById = async (e) => {
     e.preventDefault();
     try {
-      const response = await axios.get(`${API_URL}/users/${searchId}`);
+      const response = await axios.get(`${API_URL}/api/users/${searchId}`);
       setFoundUser(response.data.data); 
     } catch (error) {
       alert("User tidak ditemukan"); 
@@ -92,7 +99,7 @@ export default function Home() {
   const handleUpdateUser = async (e) => {
     e.preventDefault();
     try {
-      await axios.put(`${API_URL}/users/${updateId}`, 
+      await axios.put(`${API_URL}/api/users/${updateId}`,
         { username: updateUsername, full_name: updateFullName, email_address: updateEmailAddress });
       alert(`User ID ${updateId} berhasil diupdate!`);
       setUpdateId(''); 
@@ -110,7 +117,7 @@ export default function Home() {
   const handleDeleteUser = async (e) => {
     e.preventDefault();
     try {
-      await axios.delete(`${API_URL}/users/${deleteId}`);
+      await axios.delete(`${API_URL}/api/users/${deleteId}`);
       alert(`User ID ${deleteId} berhasil dihapus!`);
       setDeleteId('');
       if (showUsers) fetchAllUsers();
@@ -127,7 +134,7 @@ export default function Home() {
     const formData = new FormData();
     formData.append('file', uploadFile);
     try {
-      const response = await axios.post(`${API_URL}/upload`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const response = await axios.post(`${API_URL}/api/upload`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       alert('Upload Sukses!');
       setUploadedUrl(response.data.file_url || response.data.file_name); 
       if(showFirebaseFiles) fetchFirebaseFiles(); // Refresh list file otomatis
@@ -143,7 +150,7 @@ export default function Home() {
   const handleGetFile = async (e) => {
     e.preventDefault();
     try {
-      const response = await axios.get(`${API_URL}/file/${searchFilename}`);
+      const response = await axios.get(`${API_URL}/api/file/${searchFilename}`);
       setFetchedFileUrl(response.data.file_url);
     } catch (error) {
       alert("File tidak ditemukan di Firebase"); 
@@ -154,7 +161,7 @@ export default function Home() {
   // Fetch list file yang ada di Firebase
   const fetchFirebaseFiles = async () => {
     try {
-      const response = await axios.get(`${API_URL}/files`); // Butuh BE update
+      const response = await axios.get(`${API_URL}/api/files`); // Butuh BE update
       setFirebaseFiles(response.data.data || []);
       setShowFirebaseFiles(true);
     } catch (error) {
@@ -165,7 +172,7 @@ export default function Home() {
   // Fetch Policies
   const fetchPolicies = async () => {
     try {
-      const response = await axios.get(`${API_URL}/policies`); 
+      const response = await axios.get(`${API_URL}/api/policies`);
       setPolicies(response.data.data || []);
       setShowPolicies(true);
     } catch (error) { alert("Gagal mengambil data policy."); }
@@ -174,7 +181,7 @@ export default function Home() {
   // Fetch Devices
   const fetchDevices = async () => {
     try {
-      const response = await axios.get(`${API_URL}/devices`);
+      const response = await axios.get(`${API_URL}/api/devices`);
       setDevices(response.data.data || []);
       setShowDevices(true);
     } catch (error) { alert("Gagal mengambil data device."); }
@@ -191,7 +198,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-100 p-8 text-black font-sans">
       <div className="max-w-5xl mx-auto space-y-6">
-        <h1 className="text-3xl font-bold text-center mb-8 text-black underline">Dashboard</h1>
+        <h1 className="text-3xl font-bold text-center mb-8 text-black underline">Dashboard FE Succeed</h1>
 
         {/* 1. Create User */}
         <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-300">
