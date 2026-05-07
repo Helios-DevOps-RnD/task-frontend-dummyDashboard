@@ -1,0 +1,265 @@
+// Jenkins Pipeline for Staging Branch
+// Stages: Unit Tests (Jest) → SonarQube → Build Docker → Trivy Scan → Push to Harbor
+
+pipeline {
+    agent any
+
+    environment {
+        // Docker & Harbor Configuration
+        DOCKER_REGISTRY = 'registry.hms.evanlwp.my.id'  // Update with your Harbor registry
+        DOCKER_REPO = 'hms/fe'
+        DOCKER_IMAGE = "${DOCKER_REGISTRY}/${DOCKER_REPO}"
+        COMMIT_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        DOCKER_TAG = "${COMMIT_HASH}"  // Using commit hash only
+        
+        // SonarQube Configuration
+        SONARQUBE_HOST = 'http://10.0.2.4:9000'
+        SONARQUBE_TOKEN = credentials('sonarqube-token')  // Add this credential in Jenkins
+        
+        // Node Configuration
+        NODE_ENV = 'development'  // Use development to install devDependencies
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "🔄 Checking out code from staging branch..."
+                checkout scm
+                
+                script {
+                    // Get commit author info
+                    env.COMMIT_AUTHOR = sh(script: 'git log -1 --pretty=%an', returnStdout: true).trim()
+                    env.COMMIT_EMAIL = sh(script: 'git log -1 --pretty=%ae', returnStdout: true).trim()
+                    env.COMMIT_MESSAGE = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    env.COMMIT_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    
+                    echo "════════════════════════════════════════"
+                    echo "📋 Build Information"
+                    echo "════════════════════════════════════════"
+                    echo "👤 Triggered by: ${COMMIT_AUTHOR}"
+                    echo "📧 Email: ${COMMIT_EMAIL}"
+                    echo "💬 Message: ${COMMIT_MESSAGE}"
+                    echo "🔗 Commit: ${COMMIT_HASH}"
+                    echo "🏗️  Build #: ${BUILD_NUMBER}"
+                    echo "════════════════════════════════════════"
+                }
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                echo "📦 Installing npm dependencies..."
+                sh '''
+                    # Use npm cache to speed up installs
+                    npm ci --include=dev --prefer-offline --no-audit
+                    echo "Verifying Jest installation..."
+                    npm list jest
+                '''
+            }
+        }
+
+        stage('Unit Tests (Jest)') {
+            steps {
+                echo "🧪 Running Jest unit tests..."
+                sh '''
+                    npm run test:coverage || true
+                '''
+            }
+            post {
+                always {
+                    // Publish coverage reports if they exist
+                    script {
+                        if (fileExists('coverage/index.html')) {
+                            publishHTML([
+                                reportDir: 'coverage',
+                                reportFiles: 'index.html',
+                                reportName: 'Jest Coverage Report'
+                            ])
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Lint') {
+            steps {
+                echo "🔍 Running ESLint..."
+                sh 'npm run lint'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                echo "📊 Running SonarQube analysis..."
+                sh '''
+                    npx sonar-scanner \
+                        -Dsonar.projectKey=hms-task-frontend-stg \
+                        -Dsonar.sources=src \
+                        -Dsonar.host.url=${SONARQUBE_HOST} \
+                        -Dsonar.login=${SONARQUBE_TOKEN} \
+                        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+                        -Dsonar.coverage.exclusions=**/*.test.js,**/node_modules/**
+                '''
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo "🐳 Building Docker image..."
+                sh '''
+                    docker build \
+                        -t ${DOCKER_IMAGE}:${DOCKER_TAG} \
+                        -f Dockerfile .
+                '''
+            }
+        }
+
+        stage('Trivy Security Scan') {
+            steps {
+                echo "🔐 Running Trivy vulnerability scan..."
+                sh '''
+                    # Install Trivy to a Jenkins-writable directory
+                    TRIVY_DIR="${WORKSPACE}/.trivy"
+                    mkdir -p ${TRIVY_DIR}
+                    
+                    if [ ! -f ${TRIVY_DIR}/trivy ]; then
+                        echo "Installing Trivy..."
+                        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b ${TRIVY_DIR}
+                    fi
+                    
+                    # Scan Docker image
+                    ${TRIVY_DIR}/trivy image \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 0 \
+                        --format json \
+                        --output trivy-report.json \
+                        ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    
+                    # Display summary
+                    ${TRIVY_DIR}/trivy image \
+                        --severity HIGH,CRITICAL \
+                        ${DOCKER_IMAGE}:${DOCKER_TAG}
+                '''
+            }
+            post {
+                always {
+                    // Archive Trivy report
+                    archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Push to Harbor') {
+            steps {
+                echo "📤 Pushing Docker image to Harbor..."
+                withCredentials([usernamePassword(credentialsId: 'harbor-credentials', usernameVariable: 'HARBOR_USERNAME', passwordVariable: 'HARBOR_PASSWORD')]) {
+                    sh '''
+                        # Debug: Check if credentials are set
+                        if [ -z "${HARBOR_USERNAME}" ] || [ -z "${HARBOR_PASSWORD}" ]; then
+                            echo "❌ ERROR: Harbor credentials not set!"
+                            exit 1
+                        fi
+                        
+                        echo "🔐 Attempting to login to Harbor registry..."
+                        echo "Registry: ${DOCKER_REGISTRY}"
+                        echo "Username: ${HARBOR_USERNAME}"
+                        
+                        # Login to Harbor using credentials
+                        if echo ${HARBOR_PASSWORD} | docker login -u ${HARBOR_USERNAME} --password-stdin ${DOCKER_REGISTRY}; then
+                            echo "✅ Harbor login successful"
+                        else
+                            echo "❌ Harbor login failed"
+                            exit 1
+                        fi
+                        
+                        # Push image with commit hash tag only
+                        echo "📦 Pushing image: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                        docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                        
+                        # Logout
+                        docker logout ${DOCKER_REGISTRY}
+                    '''
+                }
+            }
+        }
+
+        stage('Update GitOps Repository') {
+            steps {
+                echo "🔄 Updating GitOps repository with new image tag..."
+                withCredentials([usernamePassword(credentialsId: 'git-credentials', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD')]) {
+                    sh '''
+                        # Configure Git
+                        git config --global user.email "maulanaakbar.renaldi@gmail.com"
+                        git config --global user.name "maulanaakbrr"
+                        
+                        # Clone GitOps repository
+                        GITOPS_DIR="${WORKSPACE}/gitops-hms-temp"
+                        rm -rf ${GITOPS_DIR}
+                        
+                        # Setup git credential helper with a temporary file
+                        CRED_FILE="${WORKSPACE}/.git-credentials"
+                        echo "https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com" > ${CRED_FILE}
+                        git config --global credential.helper "store --file=${CRED_FILE}"
+                        
+                        # Clone repository
+                        git clone https://github.com/Helios-DevOps-RnD/gitops-hms.git ${GITOPS_DIR}
+                        
+                        cd ${GITOPS_DIR}
+                        
+                        # Update patch-image.yaml with new tag
+                        PATCH_FILE="apps/hms-fe/overlays/staging/patch-image.yaml"
+                        
+                        # Update the image tag in the file (using DOCKER_TAG which includes -staging suffix)
+                        sed -i "s|value: registry.hms.evanlwp.my.id/hms/fe:.*|value: ${DOCKER_IMAGE}:${DOCKER_TAG}|g" ${PATCH_FILE}
+                        
+                        # Verify the change
+                        echo "Updated patch-image.yaml:"
+                        cat ${PATCH_FILE}
+                        
+                        # Commit and push changes
+                        git add ${PATCH_FILE}
+                        git commit -m "Update staging frontend image to ${DOCKER_TAG}" || echo "No changes to commit"
+                        git push origin main
+                        
+                        # Cleanup
+                        cd ${WORKSPACE}
+                        rm -rf ${GITOPS_DIR}
+                        rm -f ${CRED_FILE}
+                        git config --global --unset credential.helper
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            script {
+                echo "════════════════════════════════════════"
+                echo "✅ Staging pipeline completed successfully!"
+                echo "════════════════════════════════════════"
+                echo "👤 Triggered by: ${COMMIT_AUTHOR}"
+                echo "🚀 Image: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                echo "🔗 Build URL: ${BUILD_URL}"
+                echo "════════════════════════════════════════"
+            }
+        }
+        failure {
+            script {
+                echo "════════════════════════════════════════"
+                echo "❌ Staging pipeline failed!"
+                echo "════════════════════════════════════════"
+                echo "👤 Triggered by: ${COMMIT_AUTHOR}"
+                echo "🔗 Build URL: ${BUILD_URL}"
+                echo "════════════════════════════════════════"
+            }
+        }
+    }
+}

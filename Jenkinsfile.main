@@ -1,0 +1,174 @@
+// Jenkins Pipeline for Main Branch (Production)
+// Simple promotion pipeline: Read staging image → Approval → Update production gitops
+
+pipeline {
+    agent any
+
+    environment {
+        GITOPS_REPO_URL = 'https://github.com/Helios-DevOps-RnD/gitops-hms.git'
+        OVERLAY_DIR     = 'apps/hms-fe/overlays/production'
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    triggers {
+        githubPush()
+    }
+
+    stages {
+        // =====================================================================
+        // 1. CHECKOUT
+        // =====================================================================
+        stage('Checkout') {
+            steps {
+                echo "🔄 Checking out code from main branch..."
+                checkout scm
+            }
+        }
+
+        // =====================================================================
+        // 2. READ STAGING IMAGE
+        // =====================================================================
+        stage('Read Staging Image') {
+            steps {
+                echo "📖 Reading current staging image from gitops..."
+                withCredentials([usernamePassword(
+                    credentialsId:    'git-credentials',
+                    usernameVariable: 'GIT_USERNAME',
+                    passwordVariable: 'GIT_PASSWORD'
+                )]) {
+                    script {
+                        sh '''
+                            set -eu
+
+                            # Setup git credentials
+                            CRED_FILE="${WORKSPACE}/.git-credentials-read"
+                            echo "https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com" > ${CRED_FILE}
+                            git config --global credential.helper "store --file=${CRED_FILE}"
+
+                            # Clone gitops repo temporarily to read staging image
+                            GITOPS_TEMP="${WORKSPACE}/gitops-read-temp"
+                            rm -rf ${GITOPS_TEMP}
+                            git clone ${GITOPS_REPO_URL} ${GITOPS_TEMP}
+                            
+                            # Read staging patch-image.yaml
+                            STAGING_PATCH="${GITOPS_TEMP}/apps/hms-fe/overlays/staging/patch-image.yaml"
+                            cat ${STAGING_PATCH}
+                            
+                            # Extract image value
+                            STAGING_IMAGE=$(grep 'value:' ${STAGING_PATCH} | sed 's/.*value: //' | xargs)
+                            echo "${STAGING_IMAGE}" > ${WORKSPACE}/staging-image.txt
+                            
+                            # Cleanup
+                            rm -rf ${GITOPS_TEMP}
+                            rm -f ${CRED_FILE}
+                            git config --global --unset credential.helper
+                        '''
+                        
+                        env.STAGING_IMAGE = readFile("${WORKSPACE}/staging-image.txt").trim()
+                        echo "✅ Staging image: ${STAGING_IMAGE}"
+                    }
+                }
+            }
+        }
+
+        // =====================================================================
+        // 3. APPROVAL
+        // =====================================================================
+        stage('Approval') {
+            steps {
+                script {
+                    def userInput = input(
+                        id: 'ProductionApproval',
+                        message: "🚀 Promote to Production?",
+                        parameters: [
+                            string(
+                                name: 'IMAGE',
+                                defaultValue: "${STAGING_IMAGE}",
+                                description: 'Image to promote'
+                            ),
+                            booleanParam(
+                                name: 'CONFIRM',
+                                defaultValue: false,
+                                description: 'Confirm promotion'
+                            )
+                        ]
+                    )
+
+                    if (!userInput.CONFIRM) {
+                        error("❌ Promotion cancelled")
+                    }
+
+                    env.APPROVED_IMAGE = userInput.IMAGE
+                    echo "✅ Approved: ${APPROVED_IMAGE}"
+                }
+            }
+        }
+
+        // =====================================================================
+        // 4. UPDATE PRODUCTION GITOPS
+        // =====================================================================
+        stage('Update Production GitOps') {
+            steps {
+                echo "🔄 Updating production patch-image.yaml..."
+                withCredentials([usernamePassword(
+                    credentialsId:    'git-credentials',
+                    usernameVariable: 'GIT_USERNAME',
+                    passwordVariable: 'GIT_PASSWORD'
+                )]) {
+                    sh '''
+                        set -eu
+
+                        # Configure Git
+                        git config --global user.email "jenkins-bot@hms.evanlwp.my.id"
+                        git config --global user.name "HMS Jenkins Bot"
+
+                        # Clone gitops repo
+                        GITOPS_DIR="${WORKSPACE}/gitops-hms-prod"
+                        rm -rf ${GITOPS_DIR}
+                        
+                        CRED_FILE="${WORKSPACE}/.git-credentials"
+                        echo "https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com" > ${CRED_FILE}
+                        git config --global credential.helper "store --file=${CRED_FILE}"
+
+                        git clone ${GITOPS_REPO_URL} ${GITOPS_DIR}
+                        cd ${GITOPS_DIR}
+
+                        # Update production patch-image.yaml
+                        PATCH_FILE="${OVERLAY_DIR}/patch-image.yaml"
+                        sed -i "s|value: .*|value: ${APPROVED_IMAGE}|g" ${PATCH_FILE}
+                        
+                        echo "Updated:"
+                        cat ${PATCH_FILE}
+
+                        # Commit and push
+                        git add ${PATCH_FILE}
+                        git commit -m "ci(hms-fe-production): promote ${APPROVED_IMAGE}" || echo "No changes"
+                        git push origin main
+
+                        # Cleanup
+                        cd ${WORKSPACE}
+                        rm -rf ${GITOPS_DIR}
+                        rm -f ${CRED_FILE}
+                        git config --global --unset credential.helper
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Production promotion completed!"
+            echo "🎯 Image: ${APPROVED_IMAGE}"
+        }
+        failure {
+            echo "❌ Production promotion failed!"
+        }
+    }
+}
