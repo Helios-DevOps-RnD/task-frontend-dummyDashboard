@@ -161,10 +161,26 @@ pipeline {
                 echo "📤 Pushing Docker image to Harbor..."
                 withCredentials([usernamePassword(credentialsId: 'harbor-credentials', usernameVariable: 'HARBOR_USERNAME', passwordVariable: 'HARBOR_PASSWORD')]) {
                     sh '''
+                        # Debug: Check if credentials are set
+                        if [ -z "${HARBOR_USERNAME}" ] || [ -z "${HARBOR_PASSWORD}" ]; then
+                            echo "❌ ERROR: Harbor credentials not set!"
+                            exit 1
+                        fi
+                        
+                        echo "🔐 Attempting to login to Harbor registry..."
+                        echo "Registry: ${DOCKER_REGISTRY}"
+                        echo "Username: ${HARBOR_USERNAME}"
+                        
                         # Login to Harbor using credentials
-                        echo ${HARBOR_PASSWORD} | docker login -u ${HARBOR_USERNAME} --password-stdin ${DOCKER_REGISTRY}
+                        if echo ${HARBOR_PASSWORD} | docker login -u ${HARBOR_USERNAME} --password-stdin ${DOCKER_REGISTRY}; then
+                            echo "✅ Harbor login successful"
+                        else
+                            echo "❌ Harbor login failed"
+                            exit 1
+                        fi
                         
                         # Push image with commit hash tag only
+                        echo "📦 Pushing image: ${DOCKER_IMAGE}:${DOCKER_TAG}"
                         docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
                         
                         # Logout
