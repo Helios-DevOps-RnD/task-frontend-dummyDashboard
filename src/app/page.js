@@ -79,7 +79,7 @@ export default function Home() {
 
       if (showUsers) fetchAllUsers(); 
     } catch (error) { 
-      alert(error.response?.data?.message || 'Gagal membuat user'); 
+      alert(error.response?.data?.message || 'Gagal membuat user (test)'); 
     }
   };
 
