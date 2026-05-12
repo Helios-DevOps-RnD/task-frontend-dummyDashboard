@@ -12,8 +12,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "test:e2e": "playwright test --grep @e2e",
-    "test:ui": "playwright test --grep @ui",
+    "test:e2e": "playwright test tests/e2e/dashboard.e2e.spec.js",
+    "test:ui": "playwright test tests/e2e/dashboard.ui.spec.js",
     "test:report": "playwright show-report"
   },
   "dependencies": {
