@@ -13,7 +13,7 @@ class DashboardPage {
     this.page = page;
 
     // ── Heading ──────────────────────────────────────────────────────────────
-    this.heading = page.getByRole('heading', { name: 'Dashboard' });
+    this.heading = page.getByRole('heading', { name: 'Dashboard FE HMS' });
 
     // ── Section 1: Add User ───────────────────────────────────────────────────
     this.addUserSection = page.getByRole('heading', { name: '1. Add User' });

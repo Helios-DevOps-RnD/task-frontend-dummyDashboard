@@ -19,7 +19,7 @@ test.describe('Dashboard — Tampilan UI', () => {
 
   test('harus menampilkan judul Dashboard', async () => {
     await expect(dashboard.heading).toBeVisible();
-    await expect(dashboard.heading).toHaveText('Dashboard');
+    await expect(dashboard.heading).toHaveText('Dashboard FE HMS');
   });
 
   test('harus menampilkan semua 10 section', async ({ page }) => {
