@@ -7,8 +7,8 @@ const { DashboardPage } = require('./pages/DashboardPage');
  *
  * Test ini membutuhkan semua service berjalan:
  *   - Frontend  : http://localhost:3000
- *   - Backend Express : http://localhost:3001
- *   - Backend Pubsub  : http://localhost:3002
+ *   - Backend Express : http://127.0.0.1:3001
+ *   - Backend Pubsub  : http://127.0.0.1:3002
  *   - PostgreSQL
  *
  * Untuk skip E2E saat backend tidak tersedia: SKIP_E2E=true
@@ -86,7 +86,7 @@ test.describe('E2E — Get User By ID', () => {
       password: 'E2EPass123!',
     };
 
-    const pubsubUrl = process.env.PUBSUB_URL || 'http://localhost:3002';
+    const pubsubUrl = process.env.PUBSUB_URL || 'http://127.0.0.1:3002';
     const createRes = await page.request.post(`${pubsubUrl}/api/users`, {
       data: payload,
       headers: { 'Content-Type': 'application/json' },
@@ -125,7 +125,7 @@ test.describe('E2E — Update User', () => {
   test('harus berhasil mengupdate user dan menampilkan alert sukses', async ({ page }) => {
     // Buat user dulu
     const ts = Date.now();
-    const pubsubUrl = process.env.PUBSUB_URL || 'http://localhost:3002';
+    const pubsubUrl = process.env.PUBSUB_URL || 'http://127.0.0.1:3002';
     const createRes = await page.request.post(`${pubsubUrl}/api/users`, {
       data: {
         username: `e2e_upd_${ts}`,
@@ -164,7 +164,7 @@ test.describe('E2E — Delete User', () => {
   test('harus berhasil menghapus user dan menampilkan alert sukses', async ({ page }) => {
     // Buat user dulu
     const ts = Date.now();
-    const pubsubUrl = process.env.PUBSUB_URL || 'http://localhost:3002';
+    const pubsubUrl = process.env.PUBSUB_URL || 'http://127.0.0.1:3002';
     const createRes = await page.request.post(`${pubsubUrl}/api/users`, {
       data: {
         username: `e2e_del_${ts}`,
@@ -203,7 +203,7 @@ test.describe('E2E — Load Data Tables', () => {
     await expect(table).toBeVisible({ timeout: 10_000 });
 
     // Validasi header kolom ada
-    await expect(table.getByRole('columnheader', { name: 'ID' })).toBeVisible();
+    await expect(table.getByRole('columnheader', { name: 'ID', exact: true })).toBeVisible();
     await expect(table.getByRole('columnheader', { name: 'Username' })).toBeVisible();
     await expect(table.getByRole('columnheader', { name: 'Email Address' })).toBeVisible();
   });

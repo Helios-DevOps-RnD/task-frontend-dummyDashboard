@@ -1,4 +1,4 @@
 window.__ENV__ = {
-  API_URL: "http://localhost:3001",
-  CREATE_URL: "http://localhost:3002"
+  API_URL: "http://127.0.0.1:3001",
+  CREATE_URL: "http://127.0.0.1:3002"
 };

@@ -1,7 +1,7 @@
 // @ts-check
 const { defineConfig, devices } = require('@playwright/test');
 
-const baseURL = process.env.BASE_URL || 'http://127.0.0.1:3000';
+const baseURL = process.env.BASE_URL || 'http://localhost:3000';
 
 module.exports = defineConfig({
   testDir: './tests/e2e',
@@ -11,7 +11,7 @@ module.exports = defineConfig({
   webServer: process.env.BASE_URL
     ? undefined
     : {
-        command: 'npm run dev -- --hostname 127.0.0.1',
+        command: 'npm run dev -- --hostname localhost',
         url: baseURL,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,

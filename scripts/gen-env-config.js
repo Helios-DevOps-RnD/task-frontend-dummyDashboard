@@ -43,8 +43,8 @@ function parseEnvFile(filePath) {
 
 const fileEnv = parseEnvFile(ENV_LOCAL);
 
-const API_URL    = process.env.API_URL    ?? fileEnv.API_URL    ?? 'http://localhost:3001';
-const CREATE_URL = process.env.CREATE_URL ?? fileEnv.CREATE_URL ?? 'http://localhost:3002';
+const API_URL    = process.env.API_URL    ?? fileEnv.API_URL    ?? 'http://127.0.0.1:3001';
+const CREATE_URL = process.env.CREATE_URL ?? fileEnv.CREATE_URL ?? 'http://127.0.0.1:3002';
 
 const esc = (s) => String(s).replace(/"/g, '\\"');
 

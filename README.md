@@ -5,8 +5,8 @@ Next.js 14 UI that talks to `hms-be` (read/update/delete) and `hms-pubsub` (crea
 ## Prerequisites
 
 - Node.js 20+
-- `hms-be` running on `http://localhost:3001`
-- `hms-pubsub` running on `http://localhost:3002`
+- `hms-be` running on `http://127.0.0.1:3001`
+- `hms-pubsub` running on `http://127.0.0.1:3002`
 
 ## Quick start
 
