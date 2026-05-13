@@ -95,6 +95,30 @@ pipeline {
             }
         }
 
+        stage('Playwright UI Tests') {
+            steps {
+                echo "🎭 Running Playwright UI tests..."
+                sh '''
+                    npx playwright install chromium
+                    npm run test:ui
+                '''
+            }
+            post {
+                always {
+                    script {
+                        if (fileExists('playwright-report/index.html')) {
+                            publishHTML([
+                                reportDir: 'playwright-report',
+                                reportFiles: 'index.html',
+                                reportName: 'Playwright UI Report'
+                            ])
+                        }
+                    }
+                    archiveArtifacts artifacts: 'playwright-report/**,test-results/**', allowEmptyArchive: true
+                }
+            }
+        }
+
         stage('SonarQube Analysis') {
             steps {
                 echo "📊 Running SonarQube analysis..."
